@@ -19,3 +19,4 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   return res;
 }
+//comentario
