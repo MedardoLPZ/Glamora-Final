@@ -13,6 +13,7 @@ import ResetPassword from '../pages/auth/ResetPassword';
 import Cart from '../pages/Cart';
 import Checkout from '../pages/Checkout';
 import { useAuth } from '../context/AuthContext';
+import NewPassword from '../pages/auth/NewPassword';
 
 // Protected Route component
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
@@ -48,6 +49,7 @@ export default function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/new-password" element={<NewPassword />} />
       <Route path="/cart" element={<Cart />} />
       <Route path="/checkout" element={<Checkout />} />
       

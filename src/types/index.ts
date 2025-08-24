@@ -2,7 +2,16 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
+  role: number; // 0 = cliente, 1 = admin
+  created_at: string; // ISO date string
+  updated_at: string; 
   avatar?: string;
+}
+
+export interface AuthResponse {
+  user: User;
+  token: string;
 }
 
 export interface Service {
