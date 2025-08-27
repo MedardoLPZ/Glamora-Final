@@ -14,6 +14,7 @@ import Cart from '../pages/Cart';
 import Checkout from '../pages/Checkout';
 import { useAuth } from '../context/AuthContext';
 import NewPassword from '../pages/auth/NewPassword';
+import StylistHome from '../pages/stylist/home';
 
 // Protected Route component
 const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
@@ -52,6 +53,7 @@ export default function AppRoutes() {
       <Route path="/new-password" element={<NewPassword />} />
       <Route path="/cart" element={<Cart />} />
       <Route path="/checkout" element={<Checkout />} />
+      <Route path="/stylist/home" element={<StylistHome />} />
       
       {/* Catch all undefined routes */}
       <Route path="*" element={<Navigate to="/" replace />} />

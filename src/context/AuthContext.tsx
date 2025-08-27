@@ -12,11 +12,16 @@ import {
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<User>; // 👈 devuelve User
   signup: (name: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  resetPassword: (email: string) => Promise<void>; // POST /auth/forgot-password
-  confirmResetPassword: (email: string, token: string, password: string, password_confirmation: string) => Promise<void>; // POST /auth/reset-password
+  resetPassword: (email: string) => Promise<void>;
+  confirmResetPassword: (
+    email: string,
+    token: string,
+    password: string,
+    password_confirmation: string
+  ) => Promise<void>;
   authFetch: (path: string, init?: RequestInit) => Promise<Response>;
 }
 
@@ -26,7 +31,8 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost/glamora-bk/public/api';
+const API_BASE =
+  import.meta.env.VITE_API_URL ?? 'http://localhost/glamora-bk/public/api';
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
@@ -34,7 +40,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState(true);
 
   const safeJson = async (res: Response) => {
-    try { return await res.json(); } catch { return null; }
+    try {
+      return await res.json();
+    } catch {
+      return null;
+    }
   };
 
   const authFetch = async (path: string, init: RequestInit = {}) => {
@@ -52,7 +62,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setToken(current.token);
 
     const revalidate = async () => {
-      if (!current.token) { setLoading(false); return; }
+      if (!current.token) {
+        setLoading(false);
+        return;
+      }
       try {
         const res = await fetch(`${API_BASE}/auth/me`, {
           method: 'GET',
@@ -60,7 +73,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         });
         if (!res.ok) throw new Error('Invalid token');
         const maybeObj = await res.json();
-        const realUser: User = (maybeObj && maybeObj.user) ? maybeObj.user : maybeObj;
+        const realUser: User =
+          maybeObj && maybeObj.user ? maybeObj.user : maybeObj;
         storeSetAuth(realUser, current.token);
       } catch {
         storeClearAuth();
@@ -75,10 +89,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(state.user);
       setToken(state.token);
     });
-    return () => { off(); };
+    return () => {
+      off();
+    };
   }, []);
 
-  const login = async (email: string, password: string) => {
+  // 👇 ahora retorna el usuario logueado
+  const login = async (email: string, password: string): Promise<User> => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/login`, {
@@ -92,6 +109,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       const data = (await res.json()) as AuthResponse;
       storeSetAuth(data.user, data.token);
+      return data.user; // 👈 devolvemos el user
     } finally {
       setLoading(false);
     }
@@ -124,7 +142,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  // Solicita el email para enviar el link
   const resetPassword = async (email: string) => {
     setLoading(true);
     try {
@@ -135,21 +152,32 @@ export function AuthProvider({ children }: AuthProviderProps) {
       });
       if (!res.ok) {
         const err = await safeJson(res);
-        throw new Error(err?.message || 'No se pudo enviar el correo de recuperación');
+        throw new Error(
+          err?.message || 'No se pudo enviar el correo de recuperación'
+        );
       }
     } finally {
       setLoading(false);
     }
   };
 
-  // Aplica la nueva contraseña con token + email
-  const confirmResetPassword = async (email: string, token: string, password: string, password_confirmation: string) => {
+  const confirmResetPassword = async (
+    email: string,
+    token: string,
+    password: string,
+    password_confirmation: string
+  ) => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, token, password, password_confirmation }),
+        body: JSON.stringify({
+          email,
+          token,
+          password,
+          password_confirmation,
+        }),
       });
       if (!res.ok) {
         const err = await safeJson(res);
@@ -162,7 +190,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, signup, logout, resetPassword, confirmResetPassword, authFetch }}
+      value={{
+        user,
+        loading,
+        login,
+        signup,
+        logout,
+        resetPassword,
+        confirmResetPassword,
+        authFetch,
+      }}
     >
       {children}
     </AuthContext.Provider>
@@ -171,6 +208,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+  if (!ctx)
+    throw new Error('useAuth must be used within an AuthProvider');
   return ctx;
 }

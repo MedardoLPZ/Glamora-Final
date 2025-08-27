@@ -1,3 +1,4 @@
+// src/pages/auth/Login.tsx
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { MainLayout } from '../../components/layout/MainLayout';
@@ -11,35 +12,35 @@ import { toast } from '../../components/ui/Toaster';
 export default function Login() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
-  
-  // Check if there's a redirect URL in the query params
+  const { login } = useAuth(); // 👈 login debe retornar User
+
+  // redirect=? en la URL o a Home
   const searchParams = new URLSearchParams(location.search);
   const redirectTo = searchParams.get('redirect') || '/';
-  
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
   });
-  
+
   const [errors, setErrors] = useState({
     email: '',
     password: '',
   });
-  
+
   const [isLoading, setIsLoading] = useState(false);
-  
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
-    // Clear error when user types
+    // limpiar error del campo editado
     setErrors((prev) => ({ ...prev, [name]: '' }));
   };
-  
+
   const validateForm = () => {
     let valid = true;
     const newErrors = { email: '', password: '' };
-    
+
     if (!formData.email) {
       newErrors.email = 'Email is required';
       valid = false;
@@ -47,27 +48,33 @@ export default function Login() {
       newErrors.email = 'Email is invalid';
       valid = false;
     }
-    
+
     if (!formData.password) {
       newErrors.password = 'Password is required';
       valid = false;
     }
-    
+
     setErrors(newErrors);
     return valid;
   };
-  
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) return;
-    
+
     setIsLoading(true);
-    
     try {
-      await login(formData.email, formData.password);
+      // 👇 login devuelve el usuario autenticado
+      const loggedUser = await login(formData.email, formData.password);
+
       toast('Login successful!', 'success');
-      navigate(redirectTo);
+
+      // Redirección por rol (forzamos a número por si viene como string)
+      const destination =
+        Number(loggedUser?.role) === 1 ? '/stylist/home' : redirectTo;
+
+      navigate(destination, { replace: true });
     } catch (error) {
       if (error instanceof Error) {
         toast(error.message, 'error');
@@ -78,7 +85,7 @@ export default function Login() {
       setIsLoading(false);
     }
   };
-  
+
   return (
     <MainLayout hideNav>
       <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-primary-50 to-white">
@@ -94,7 +101,7 @@ export default function Login() {
               Sign in to your account to continue
             </p>
           </div>
-          
+
           <form onSubmit={handleSubmit}>
             <div className="space-y-4">
               <Input
@@ -109,7 +116,7 @@ export default function Login() {
                 fullWidth
                 leftIcon={<Mail className="w-5 h-5 text-gray-400" />}
               />
-              
+
               <Input
                 label="Password"
                 type="password"
@@ -122,7 +129,7 @@ export default function Login() {
                 fullWidth
                 leftIcon={<Lock className="w-5 h-5 text-gray-400" />}
               />
-              
+
               <div className="flex justify-end">
                 <Link
                   to="/reset-password"
@@ -132,7 +139,7 @@ export default function Login() {
                 </Link>
               </div>
             </div>
-            
+
             <Button
               type="submit"
               variant="primary"
@@ -144,7 +151,7 @@ export default function Login() {
               Sign In
             </Button>
           </form>
-          
+
           <div className="mt-8 text-center">
             <p className="text-gray-600">
               Don't have an account?{' '}
@@ -153,7 +160,7 @@ export default function Login() {
               </Link>
             </p>
           </div>
-          
+
           <div className="mt-8 pt-6 border-t border-gray-200 text-center">
             <Link to="/" className="text-sm text-gray-500 hover:text-primary-600">
               ← Back to Home

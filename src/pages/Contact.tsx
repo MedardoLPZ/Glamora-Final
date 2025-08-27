@@ -1,9 +1,16 @@
+// src/pages/Contact.tsx
 import { useState } from 'react';
 import { MainLayout } from '../components/layout/MainLayout';
 import { Input } from '../components/ui/Input';
 import { Button } from '../components/ui/Button';
 import { toast } from '../components/ui/Toaster';
-import { Mail, Phone, MapPin, Clock, Send } from 'lucide-react';
+import { Mail, Phone, MapPin, Clock, Send, User } from 'lucide-react';
+
+type Errors = Partial<Record<'name'|'email'|'phone'|'message', string>>;
+
+// Usa la MISMA variable que tu AuthContext
+// En .env: VITE_API_URL=http://localhost/glamora-bk/public/api
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost/glamora-bk/public/api';
 
 export default function Contact() {
   const [formData, setFormData] = useState({
@@ -11,31 +18,83 @@ export default function Contact() {
     email: '',
     phone: '',
     message: '',
+    company: '' // honeypot (DEBE quedar vacío)
   });
-
+  const [errors, setErrors] = useState<Errors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    setErrors(prev => ({ ...prev, [name]: '' }));
+  };
+
+  const validate = (): boolean => {
+    const errs: Errors = {};
+    const name = formData.name.trim();
+    const email = formData.email.trim().toLowerCase();
+    const phone = formData.phone.trim();
+    const message = formData.message.trim();
+
+    if (!name) errs.name = 'Name is required';
+    if (!email) errs.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(email)) errs.email = 'Email is invalid';
+    if (!message) errs.message = 'Message is required';
+    else if (message.length < 10) errs.message = 'Please write at least 10 characters';
+    if (phone && phone.length < 7) errs.phone = 'Phone seems too short';
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
+    if (!validate()) return;
 
-    // Simulate API call
+    setIsSubmitting(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      toast('Message sent successfully! We\'ll get back to you soon.', 'success');
-      setFormData({
-        name: '',
-        email: '',
-        phone: '',
-        message: '',
+      // Importante: tu API_BASE ya termina en /api → solo /contact
+      const res = await fetch(`${API_BASE}/contact`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        // Honeypot se envía vacío si es humano
+        body: JSON.stringify({
+          name: formData.name.trim(),
+          email: formData.email.trim().toLowerCase(),
+          phone: formData.phone.trim() || null,
+          message: formData.message.trim(),
+          company: formData.company,
+        }),
       });
-    } catch (error) {
-      toast('Failed to send message. Please try again.', 'error');
+
+      if (!res.ok) {
+        // Manejo de 422 y otros errores con fallback a texto
+        let msg = 'Failed to send message. Please try again.';
+        try {
+          const data = await res.json();
+          if (data?.errors) {
+            const laravelErrors: Errors = {};
+            Object.entries(data.errors).forEach(([k, v]) => {
+              laravelErrors[k as keyof Errors] = Array.isArray(v) ? v[0] : String(v);
+            });
+            setErrors(laravelErrors);
+          }
+          if (data?.message) msg = data.message;
+        } catch {
+          const txt = await res.text().catch(() => '');
+          if (txt) msg = txt.slice(0, 200);
+        }
+        throw new Error(msg);
+      }
+
+      toast('¡Mensaje enviado! Te contactaremos pronto.', 'success');
+      setFormData({ name: '', email: '', phone: '', message: '', company: '' });
+      setErrors({});
+    } catch (err: any) {
+      toast(err?.message ?? 'Network error. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -58,7 +117,18 @@ export default function Contact() {
             {/* Contact Form */}
             <div className="bg-white p-8 rounded-lg shadow-soft">
               <h2 className="mb-6">Send us a Message</h2>
-              <form onSubmit={handleSubmit}>
+              <form onSubmit={handleSubmit} noValidate>
+                {/* Honeypot anti-spam (oculto) */}
+                <input
+                  type="text"
+                  name="company"
+                  value={formData.company}
+                  onChange={handleChange}
+                  className="hidden"
+                  autoComplete="off"
+                  tabIndex={-1}
+                />
+
                 <Input
                   label="Your Name"
                   id="name"
@@ -66,6 +136,8 @@ export default function Contact() {
                   value={formData.name}
                   onChange={handleChange}
                   required
+                  error={errors.name}
+                  leftIcon={<User className="w-5 h-5 text-gray-400" />}
                 />
                 <Input
                   label="Email Address"
@@ -75,6 +147,8 @@ export default function Contact() {
                   value={formData.email}
                   onChange={handleChange}
                   required
+                  error={errors.email}
+                  leftIcon={<Mail className="w-5 h-5 text-gray-400" />}
                 />
                 <Input
                   label="Phone Number"
@@ -83,6 +157,8 @@ export default function Contact() {
                   name="phone"
                   value={formData.phone}
                   onChange={handleChange}
+                  error={errors.phone}
+                  leftIcon={<Phone className="w-5 h-5 text-gray-400" />}
                 />
                 <div className="mb-4">
                   <label
@@ -95,20 +171,27 @@ export default function Contact() {
                     id="message"
                     name="message"
                     rows={5}
-                    className="px-4 py-2.5 bg-white border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition duration-200 w-full"
+                    className={`px-4 py-2.5 bg-white border rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition duration-200 w-full ${
+                      errors.message ? 'border-red-400' : 'border-gray-200'
+                    }`}
                     value={formData.message}
                     onChange={handleChange}
                     required
                   />
+                  {errors.message && (
+                    <p className="mt-1 text-sm text-red-500">{errors.message}</p>
+                  )}
                 </div>
+
                 <Button
                   type="submit"
                   size="lg"
                   fullWidth
                   isLoading={isSubmitting}
+                  disabled={isSubmitting}
                   leftIcon={<Send className="w-4 h-4" />}
                 >
-                  Send Message
+                  {isSubmitting ? 'Sending...' : 'Send Message'}
                 </Button>
               </form>
             </div>
@@ -124,8 +207,8 @@ export default function Contact() {
                   <div>
                     <h3 className="text-lg font-medium mb-2">Our Location</h3>
                     <p className="text-gray-600">
-                    Res. Costas del Sol, <br />
-                    15 calle 21103 San Pedro Sula, Cortés
+                      Res. Costas del Sol, <br />
+                      15 calle 21103 San Pedro Sula, Cortés
                     </p>
                   </div>
                 </div>
@@ -137,8 +220,8 @@ export default function Contact() {
                   <div>
                     <h3 className="text-lg font-medium mb-2">Phone Number</h3>
                     <p className="text-gray-600">
-                      <a href="tel:+15551234567" className="hover:text-primary-600 transition-colors">
-                      (504) 9524-8210
+                      <a href="tel:+50495248210" className="hover:text-primary-600 transition-colors">
+                        (504) 9524-8210
                       </a>
                     </p>
                   </div>
@@ -151,8 +234,8 @@ export default function Contact() {
                   <div>
                     <h3 className="text-lg font-medium mb-2">Email Address</h3>
                     <p className="text-gray-600">
-                      <a href="mailto:info@glamorastudio.com" className="hover:text-primary-600 transition-colors">
-                      info@glamorastudiohn.com
+                      <a href="mailto:info@glamorastudiohn.com" className="hover:text-primary-600 transition-colors">
+                        info@glamorastudiohn.com
                       </a>
                     </p>
                   </div>
@@ -180,6 +263,7 @@ export default function Contact() {
                     </ul>
                   </div>
                 </div>
+
               </div>
             </div>
           </div>
@@ -191,7 +275,7 @@ export default function Contact() {
         <div className="container">
           <div className="bg-gray-200 h-96 rounded-lg overflow-hidden">
             <iframe
-              src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d423286.27404345275!2d-118.69192047471653!3d34.02016130653294!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x80c2c75ddc27da13%3A0xe22fdf6f254608f4!2sLos%20Angeles%2C%20CA%2C%20USA!5e0!3m2!1sen!2s!4v1657991558353!5m2!1sen!2s"
+              src="https://www.google.com/maps?q=15.4892816,-87.9944183&z=18&output=embed"
               width="100%"
               height="100%"
               style={{ border: 0 }}
@@ -199,7 +283,7 @@ export default function Contact() {
               loading="lazy"
               referrerPolicy="no-referrer-when-downgrade"
               title="Glamora Studio Location"
-            ></iframe>
+            />
           </div>
         </div>
       </section>
