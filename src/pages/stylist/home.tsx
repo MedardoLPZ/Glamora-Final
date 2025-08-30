@@ -2,34 +2,47 @@ import React, { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import {
-  Search, Scissors, Users, Calendar, Package, UserPlus, Plus, AlertCircle, LogOut,
+  Search,
+  Scissors,
+  Users,
+  Calendar,
+  UserPlus,
+  Plus,
+  AlertCircle,
+  LogOut,
+  Phone,
+  Mail,
 } from "lucide-react";
 
-import { ClientCard } from "./ClientCard";
 import { AppointmentRequestCard } from "./AppointmentRequestCard";
-import { StylistModal, type Stylist as ModalStylist } from "./StylistModal";
+import { StylistModal } from "./StylistModal";
 import { ProductModal } from "./ProductModal";
 import ServicesModal, { Service as ModalSvc } from "./ServicesModal";
 
-import {
-  mockClients, mockAppointments, mockProductOrders, mockStylists, mockProducts,
-} from "../../data/mockData";
+// tipos del app
+import type { Appointment, ProductOrder, Product } from "../../types";
 
-// 👇 tipos del app (tu estado global/local)
-import type { Appointment, ProductOrder, Product } from "../../types/salon";
 type AppStylist = {
   id: string;
   name: string;
   specialties?: string[];
   photo?: string;
-  // opcional si quieres conservar bio/img en tu estado:
   bio?: string;
   img?: string;
 };
 
 import { makeStylistsApi } from "../../api/stylist.api";
 
-type UserOption = { id: string; name: string; email?: string };
+// Usuario/cliente proveniente del backend
+import {
+  listClientsInfoCached,
+  clearClientsInfoCache,
+  type ClientUser,
+} from "../../api/users.api";
+
+const API_BASE =
+  (import.meta as any).env?.VITE_API_URL?.replace(/\/$/, "") ||
+  "http://localhost/glamora-bk/public/api";
 
 function Home() {
   const navigate = useNavigate();
@@ -38,148 +51,114 @@ function Home() {
   const api = useMemo(() => makeStylistsApi(authFetch), [authFetch]);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [appointments, setAppointments] = useState<Appointment[]>(mockAppointments);
-  const [productOrders] = useState<ProductOrder[]>(mockProductOrders);
 
-  // estado estilistas en el app
-  const [stylists, setStylists] = useState<AppStylist[]>(mockStylists as unknown as AppStylist[]);
-
-  const [products, setProducts] = useState<Product[]>(mockProducts);
+  // Data
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [productOrders] = useState<ProductOrder[]>([]);
+  const [stylists, setStylists] = useState<AppStylist[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [services, setServices] = useState<ModalSvc[]>([]);
+  const [clients, setClients] = useState<ClientUser[]>([]);
 
+  // Modals
   const [stylistModalOpen, setStylistModalOpen] = useState(false);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [showServices, setShowServices] = useState(false);
 
-  // usuarios para el combobox del modal
-  const [users, setUsers] = useState<UserOption[]>([]);
-
-  // Cargar usuarios (ajusta la ruta a tu API real)
+  // CLIENTES desde backend (/users/info) forzando refetch para evitar caché viejo
   useEffect(() => {
+    let alive = true;
     (async () => {
       try {
-        const res = await authFetch("/users?all=1");
-        const j = await res.json();
-        setUsers(j.map((u: any) => ({ id: String(u.id), name: u.name, email: u.email })));
-      } catch {
-        setUsers([]);
+        clearClientsInfoCache();
+        const list = await listClientsInfoCached({
+          fetcher: authFetch,
+          forceRefresh: true,
+          ttlMs: 0,
+        });
+        if (alive) setClients(list);
+      } catch (e) {
+        console.error("users/info error:", e);
+        if (alive) setClients([]);
       }
     })();
+    return () => {
+      alive = false;
+    };
   }, [authFetch]);
 
-  // (OPCIONAL) refrescar estilistas desde backend para no depender del mock
+  // ESTILISTAS desde API
   useEffect(() => {
     (async () => {
       try {
         const { data } = await api.listStylistsUI({ all: true });
         setStylists(
-          data.map((d) => ({
-            id: d.id,
-            name: d.name,
+          data.map((d: any) => ({
+            id: String(d.id),
+            name: String(d.name),
             specialties: d.specialty ? [d.specialty] : [],
             photo: d.image ?? "",
-            bio: (d as any).bio ?? "",
+            bio: d.bio ?? "",
             img: d.image ?? "",
           }))
         );
       } catch {
-        // si falla, te quedas con el mock
+        setStylists([]);
       }
     })();
   }, [api]);
 
-  const filteredClients = React.useMemo(() => {
-    return mockClients.filter(
-      (client) =>
-        client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        client.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        client.phone.includes(searchTerm)
+  // Búsqueda local sobre clients (backend)
+  const filteredClients = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return clients;
+    return clients.filter(
+      (c) =>
+        c.name.toLowerCase().includes(q) ||
+        c.email.toLowerCase().includes(q) ||
+        (c.phone ?? "").toLowerCase().includes(q)
     );
-  }, [searchTerm]);
+  }, [clients, searchTerm]);
 
-  const pendingAppointments = React.useMemo(
+  const pendingAppointments = useMemo(
     () => appointments.filter((apt) => apt.status === "pending"),
     [appointments]
   );
 
-  const stats = React.useMemo(() => {
-    const totalClients = mockClients.length;
-    const upcomingAppointments = appointments.filter((a) => a.status === "upcoming").length;
-    const pendingOrders = productOrders.filter((o) => o.status === "pending").length;
+  // Stats (dejamos Total y Upcoming para las dos mitades)
+  const stats = useMemo(() => {
+    const totalClients = clients.length;
+    const upcomingAppointments = appointments.filter((a) => a.status === "confirmed").length;
+    const pendingOrders = productOrders.filter((o: any) => (o as any).status === "pending").length;
     const pendingRequests = appointments.filter((a) => a.status === "pending").length;
     return { totalClients, upcomingAppointments, pendingOrders, pendingRequests };
-  }, [appointments, productOrders]);
+  }, [clients.length, appointments, productOrders]);
 
   const handleLogout = async () => {
-    try { await logout(); } finally { navigate("/login", { replace: true }); }
+    try {
+      await logout();
+    } finally {
+      navigate("/login", { replace: true });
+    }
   };
 
-  // --- handlers mock (sin cambios)
+  // --- handlers
   const handleAcceptAppointment = (id: string) =>
-    setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "upcoming" } : a)));
+    setAppointments((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: "confirmed" } : a))
+    );
+
   const handleDeclineAppointment = (id: string) =>
     setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "cancelled" } : a)));
+
   const handleCancelAppointment = (id: string) =>
     setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "cancelled" } : a)));
+
   const handleRebookAppointment = (id: string, date: string, time: string) =>
     setAppointments((prev) => prev.map((a) => (a.id === id ? { ...a, date, time } : a)));
 
-  // ----- App <-> Modal mapeos -----
-  const modalStylists: ModalStylist[] = stylists.map((s) => ({
-    id: s.id,
-    name: s.name,
-    specialty: s.specialties?.[0] ?? "",
-    bio: s.bio ?? "",
-    img: s.img ?? s.photo ?? "",
-  }));
-
-  function toAppStylists(rows: ModalStylist[]): AppStylist[] {
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      specialties: r.specialty ? [r.specialty] : [],
-      photo: r.img ?? "",
-      bio: r.bio ?? "",
-      img: r.img ?? "",
-    }));
-  }
-
-  // Crear estilista usando la API (recibe payload del modal)
-  const handleCreateStylist: React.ComponentProps<typeof StylistModal>["onAddStylist"] =
-    async ({ user_id, specialty, bio, img }) => {
-      // crea (img va como "file" dentro del cliente API)
-      await api.createStylist({
-        user_id,
-        specialty,
-        active: true,
-        img: img ?? undefined,
-      });
-
-      // si tu backend ya soporta bio en POST, descomenta:
-      if (bio && (api as any).updateStylist) {
-        try {
-          // actualiza nota: si el create no devuelve el ID cómodamente,
-          // refrescamos todo y no hacemos este update extra.
-        } catch {}
-      }
-
-      // refrescamos desde backend
-      const { data } = await api.listStylistsUI({ all: true });
-      setStylists(
-        data.map((d) => ({
-          id: d.id,
-          name: d.name,
-          specialties: d.specialty ? [d.specialty] : [],
-          photo: d.image ?? "",
-          bio: (d as any).bio ?? "",
-          img: d.image ?? "",
-        }))
-      );
-    };
-
-  // Productos (sin cambios)
   const handleAddProduct = (newProduct: Omit<Product, "id">) =>
-    setProducts((prev) => [...prev, { ...newProduct, id: Date.now().toString() }]);
+    setProducts((prev) => [...prev, { id: Date.now().toString(), ...newProduct }]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50">
@@ -202,28 +181,32 @@ function Home() {
                 onClick={() => setStylistModalOpen(true)}
                 className="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
               >
-                <UserPlus size={18} /><span>Manage Stylists</span>
+                <UserPlus size={18} />
+                <span>Stylists</span>
               </button>
 
               <button
                 onClick={() => setProductModalOpen(true)}
                 className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors"
               >
-                <Plus size={18} /><span>Manage Products</span>
+                <Plus size={18} />
+                <span>Products</span>
               </button>
 
               <button
                 onClick={() => setShowServices(true)}
                 className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg flex items-center space-x-2 transition-colors shadow-sm"
               >
-                <Plus size={18} /><span>Manage Services</span>
+                <Plus size={18} />
+                <span>Services</span>
               </button>
 
               <button
                 onClick={handleLogout}
                 className="bg-pink-500 hover:bg-pink-600 text-white px-4 py-2 rounded-lg transition-colors font-medium flex items-center space-x-2"
               >
-                <LogOut size={18} /><span>Logout</span>
+                <LogOut size={18} />
+                <span>Logout</span>
               </button>
             </div>
           </div>
@@ -232,14 +215,13 @@ function Home() {
 
       {/* Stats */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <StatCard icon={<AlertCircle className="h-6 w-6 text-red-600" />} label="Pending Requests" value={stats.pendingRequests} bg="bg-red-100" />
+        {/* 2 tarjetas: mitad y mitad */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
           <StatCard icon={<Users className="h-6 w-6 text-blue-600" />} label="Total Clients" value={stats.totalClients} bg="bg-blue-100" />
           <StatCard icon={<Calendar className="h-6 w-6 text-green-600" />} label="Upcoming Appointments" value={stats.upcomingAppointments} bg="bg-green-100" />
-          <StatCard icon={<Package className="h-6 w-6 text-purple-600" />} label="Pending Orders" value={stats.pendingOrders} bg="bg-purple-100" />
         </div>
 
-        {/* Appointment Requests */}
+        {/* Appointment Requests (si los usas) */}
         {pendingAppointments.length > 0 && (
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center">
@@ -248,14 +230,14 @@ function Home() {
             </h2>
             <div className="space-y-4">
               {pendingAppointments.map((appointment) => {
-                const client = mockClients.find((c) => c.id === appointment.clientId);
-                const stylist = stylists.find((s) => s.id === appointment.stylistId);
+                const client = clients.find((c) => c.id === String((appointment as any).userId));
+                const stylist = stylists.find((s) => s.id === String((appointment as any).stylistId));
                 if (!client) return null;
                 return (
                   <AppointmentRequestCard
                     key={appointment.id}
                     appointment={appointment}
-                    client={client}
+                    client={client as any}
                     stylist={stylist as any}
                     onAccept={handleAcceptAppointment}
                     onDecline={handleDeclineAppointment}
@@ -280,22 +262,11 @@ function Home() {
           />
         </div>
 
-        {/* Client Cards */}
+        {/* Client list: SOLO nombre, teléfono y correo */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {filteredClients.map((client) => {
-            const clientAppointments = appointments.filter((a) => a.clientId === client.id);
-            const clientOrders = productOrders.filter((o) => o.clientId === client.id);
-            return (
-              <ClientCard
-                key={client.id}
-                client={client}
-                appointments={clientAppointments}
-                productOrders={clientOrders}
-                onCancelAppointment={handleCancelAppointment}
-                onRebookAppointment={handleRebookAppointment}
-              />
-            );
-          })}
+          {filteredClients.map((client) => (
+            <SimpleClientCard key={client.id} client={client} />
+          ))}
         </div>
 
         {filteredClients.length === 0 && (
@@ -310,16 +281,13 @@ function Home() {
       </div>
 
       {/* Modals */}
-      <StylistModal
-        isOpen={stylistModalOpen}
-        onClose={() => setStylistModalOpen(false)}
-      />
+      <StylistModal isOpen={stylistModalOpen} onClose={() => setStylistModalOpen(false)} />
 
       <ProductModal
         isOpen={productModalOpen}
         onClose={() => setProductModalOpen(false)}
         onAddProduct={(newProduct) =>
-          setProducts((prev) => [...prev, { ...newProduct, id: Date.now().toString() }])
+          setProducts((prev) => [...prev, { id: Date.now().toString(), ...newProduct }])
         }
         onUpdateProducts={setProducts}
         products={products}
@@ -338,8 +306,16 @@ function Home() {
 }
 
 function StatCard({
-  icon, label, value, bg,
-}: { icon: React.ReactNode; label: string; value: number; bg: string }) {
+  icon,
+  label,
+  value,
+  bg,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  bg: string;
+}) {
   return (
     <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
       <div className="flex items-center">
@@ -347,6 +323,37 @@ function StatCard({
         <div className="ml-4">
           <p className="text-2xl font-bold text-gray-900">{value}</p>
           <p className="text-gray-600">{label}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Tarjeta ligera: solo nombre, teléfono y correo */
+function SimpleClientCard({ client }: { client: ClientUser }) {
+  const initials = (client.name || "")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]?.toUpperCase())
+    .join("") || "CU";
+
+  return (
+    <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
+      <div className="bg-pink-500 text-white p-5 flex items-center gap-4">
+        <div className="h-12 w-12 rounded-xl bg-white/20 flex items-center justify-center text-lg font-bold">
+          {initials}
+        </div>
+        <div className="min-w-0">
+          <h3 className="text-lg font-semibold leading-tight truncate">{client.name}</h3>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm opacity-90">
+            <span className="flex items-center gap-1">
+              <Phone size={14} /> {client.phone || "—"}
+            </span>
+            <span className="flex items-center gap-1">
+              <Mail size={14} /> {client.email || "—"}
+            </span>
+          </div>
         </div>
       </div>
     </div>

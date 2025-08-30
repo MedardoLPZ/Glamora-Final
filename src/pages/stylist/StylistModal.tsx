@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Trash2, Upload, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { makeStylistsApi, type UIStylist, type UserName } from "../../api/stylist.api";
@@ -58,6 +58,12 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // 🔒 Anti doble-submit en "Add"
+  const [creating, setCreating] = useState(false);
+
+  // 🔒 Anti doble-click por fila (save / deactivate reentrante)
+  const savingRowsRef = useRef<Set<string>>(new Set());
 
   const [adding, setAdding] = useState<AddingState>({
     userId: "",
@@ -124,11 +130,13 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
 
   async function createNow(e: React.FormEvent) {
     e.preventDefault();
+    if (creating) return;               // 🔒 guard reentrante
     setError(null);
     if (!adding.userId) return setError("Selecciona un usuario.");
     if (!adding.specialty.trim()) return setError("La especialidad es obligatoria.");
 
     try {
+      setCreating(true);                // 🔒 bloquear botón "Add Stylist"
       await api.createStylist({
         user_id: adding.userId,
         specialty: adding.specialty,
@@ -154,12 +162,19 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
       setAdding({ userId: "", specialty: "", bio: "", img: "", _file: null });
     } catch (e: any) {
       setError(e?.message || "No se pudo crear la estilista.");
+    } finally {
+      setCreating(false);
     }
   }
 
   async function saveRow(r: Row) {
     if (!r.id || r.id.startsWith("tmp_")) return;
     if (!r.userId) { setError("Este stylist no tiene usuario asignado. Selecciona uno y guarda nuevamente."); return; }
+
+    // 🔒 evita doble click inmediato
+    if (savingRowsRef.current.has(r.id)) return;
+    savingRowsRef.current.add(r.id);
+
     setBusyId(r.id);
     setError(null);
     try {
@@ -186,12 +201,18 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
     } catch (e: any) {
       setError(e?.message || "No se pudo actualizar la estilista.");
     } finally {
+      savingRowsRef.current.delete(r.id);  // 🔓
       setBusyId(null);
     }
   }
 
   async function deactivateRow(r: Row) {
     if (!r.id || r.id.startsWith("tmp_")) return;
+
+    // 🔒 evita doble click inmediato en desactivar
+    if (savingRowsRef.current.has(r.id)) return;
+    savingRowsRef.current.add(r.id);
+
     setBusyId(r.id);
     setError(null);
 
@@ -211,6 +232,7 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
     } catch (e: any) {
       setError(e?.message || "No se pudo desactivar la estilista.");
     } finally {
+      savingRowsRef.current.delete(r.id);  // 🔓
       setBusyId(null);
     }
   }
@@ -262,7 +284,7 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                         accept="image/*"
                         onChange={onUploadToRow(s.id)}
                         className="text-xs"
-                        disabled={busyId === s.id}
+                        disabled={busyId === s.id || savingRowsRef.current.has(s.id)}
                       />
                     </div>
                   </div>
@@ -312,7 +334,7 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                         value={s.specialty || ""}
                         onChange={(e) => updateField(s.id, "specialty", e.target.value)}
                         className="w-full px-3 py-2 border rounded-lg"
-                        disabled={busyId === s.id}
+                        disabled={busyId === s.id || savingRowsRef.current.has(s.id)}
                         placeholder="e.g., Lashes, Nails, Hair…"
                       />
                     </div>
@@ -334,7 +356,7 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                         className="w-full px-3 py-2 border rounded-lg"
                         rows={2}
                         placeholder="Short bio (optional)"
-                        disabled={busyId === s.id}
+                        disabled={busyId === s.id || savingRowsRef.current.has(s.id)}
                       />
                     </div>
                   </div>
@@ -342,15 +364,15 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                   <div className="flex items-center justify-between">
                     <button
                       onClick={() => saveRow(s)}
-                      className="px-3 py-2 rounded-lg bg-neutral-900 text-white hover:bg-black disabled:opacity-50"
-                      disabled={busyId === s.id}
+                      className="px-3 py-2 rounded-lg bg-neutral-900 text-white hover:bg-black disabled:opacity-50 disabled:pointer-events-none"
+                      disabled={busyId === s.id || savingRowsRef.current.has(s.id)}
                     >
-                      {busyId === s.id ? "Saving…" : "Save"}
+                      {busyId === s.id || savingRowsRef.current.has(s.id) ? "Saving…" : "Save"}
                     </button>
                     <button
                       onClick={() => deactivateRow(s)}
-                      className="p-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
-                      disabled={busyId === s.id}
+                      className="p-2 rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 disabled:pointer-events-none"
+                      disabled={busyId === s.id || savingRowsRef.current.has(s.id)}
                       title="Deactivate stylist"
                     >
                       <Trash2 size={16} />
@@ -376,6 +398,7 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                     onChange={(e) => setAdding(a => ({ ...a, userId: e.target.value }))}
                     className="w-full px-3 py-2 border rounded-lg bg-white"
                     required
+                    disabled={creating}
                   >
                     <option value="">Select a user…</option>
                     {users.map(u => (
@@ -385,10 +408,10 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                 </div>
                 <div>
                   <label className="block text-xs text-neutral-500">Upload Image</label>
-                  <label className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 hover:bg-neutral-50 cursor-pointer">
+                  <label className={`inline-flex items-center gap-2 rounded-lg border border-neutral-300 px-3 py-2 ${creating ? "opacity-50 pointer-events-none" : "hover:bg-neutral-50 cursor-pointer"}`}>
                     <Upload size={16} />
                     <span className="text-sm">Choose File</span>
-                    <input type="file" accept="image/*" className="hidden" onChange={onUploadToAdding} />
+                    <input type="file" accept="image/*" className="hidden" onChange={onUploadToAdding} disabled={creating} />
                   </label>
                 </div>
               </div>
@@ -407,6 +430,7 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                 className="w-full px-3 py-2 border rounded-lg"
                 placeholder="Specialty (e.g., Lashes, Nails, Hair…)"
                 required
+                disabled={creating}
               />
 
               <textarea
@@ -415,10 +439,15 @@ export const StylistModal: React.FC<StylistModalProps> = ({ isOpen, onClose }) =
                 className="w-full px-3 py-2 border rounded-lg"
                 rows={3}
                 placeholder="Short bio (optional)"
+                disabled={creating}
               />
 
-              <button type="submit" className="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700">
-                Add Stylist
+              <button
+                type="submit"
+                className="px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 disabled:opacity-50 disabled:pointer-events-none"
+                disabled={creating}
+              >
+                {creating ? "Creating…" : "Add Stylist"}
               </button>
             </form>
           </div>

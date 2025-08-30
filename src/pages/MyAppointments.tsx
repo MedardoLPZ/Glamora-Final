@@ -7,8 +7,8 @@ import { toast } from '../components/ui/Toaster';
 import { Calendar } from 'lucide-react';
 import { onAuthChange, getToken } from '../lib/authStore';
 
-// ⬇️ importa helpers del data layer
-import { getAppointments, cancelAppointmentApi } from '../data/appointments';
+// ahora desde el API layer
+import { getAppointments, cancelAppointmentApi } from '../api/bookings.api';
 
 export default function MyAppointments() {
   const { user, authFetch } = useAuth();
@@ -22,11 +22,10 @@ export default function MyAppointments() {
   }, []);
 
   useEffect(() => {
-    if (!user || !token) return; // si quieres, puedes dejar solo if (!user) return;
+    if (!user || !token) return;
     (async () => {
       try {
         setLoading(true);
-        // ✅ ahora usa el data layer; ya mapea status y convierte hora a 12h si hace falta
         const list = await getAppointments(authFetch);
         setAppointments(list);
       } catch (e: any) {
@@ -37,20 +36,15 @@ export default function MyAppointments() {
     })();
   }, [user, token, authFetch]);
 
-  // Agrupación: próximas = pending|confirmed, pasadas = completed|cancelled
   const { upcomingAppointments, pastAppointments } = useMemo(() => {
-    const upcoming = appointments.filter(a =>
-      a.status === 'pending' || a.status === 'confirmed'
-    );
-    const past = appointments.filter(a =>
-      a.status === 'completed' || a.status === 'cancelled'
-    );
+    const upcoming = appointments.filter(a => a.status === 'pending' || a.status === 'confirmed');
+    const past = appointments.filter(a => a.status === 'completed' || a.status === 'cancelled');
     return { upcomingAppointments: upcoming, pastAppointments: past };
   }, [appointments]);
 
   const handleCancelAppointment = async (id: string) => {
     try {
-      await cancelAppointmentApi(id, authFetch); // ✅ usa data layer
+      await cancelAppointmentApi(id, authFetch);
       setAppointments(prev =>
         prev.map(a => (a.id === id ? { ...a, status: 'cancelled' } : a))
       );
@@ -88,7 +82,6 @@ export default function MyAppointments() {
 
       <section className="section">
         <div className="container">
-          {/* Próximas citas */}
           <h2 className="mb-8">Próximas citas</h2>
 
           {loading ? (
@@ -99,7 +92,6 @@ export default function MyAppointments() {
                 <AppointmentCard
                   key={appointment.id}
                   appointment={appointment}
-                  // botón Cancelar solo para pending/confirmed
                   onCancel={
                     appointment.status === 'pending' || appointment.status === 'confirmed'
                       ? handleCancelAppointment
@@ -119,15 +111,11 @@ export default function MyAppointments() {
             </div>
           )}
 
-          {/* Citas pasadas */}
           <h2 className="mb-8 mt-16">Citas pasadas</h2>
           {pastAppointments.length > 0 && !loading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {pastAppointments.map((appointment) => (
-                <AppointmentCard
-                  key={appointment.id}
-                  appointment={appointment}
-                />
+                <AppointmentCard key={appointment.id} appointment={appointment} />
               ))}
             </div>
           ) : (

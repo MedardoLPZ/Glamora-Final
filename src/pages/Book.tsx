@@ -1,3 +1,4 @@
+// src/pages/Book.tsx
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -5,168 +6,241 @@ import { MainLayout } from '../components/layout/MainLayout';
 import { Button } from '../components/ui/Button';
 import { ServiceCard } from '../components/ServiceCard';
 import { StylistCard } from '../components/StylistCard';
-import { getAvailableServices, getServiceById } from '../data/services';
-import { Service, Stylist, BookingFormData } from '../types';
+import type { Service, Stylist, BookingFormData } from '../types';
 import { generateTimeSlots, formatPrice, RESERVATION_FEE } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import { toast } from '../components/ui/Toaster';
-import { ArrowLeft, ArrowRight, Info } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Info, Loader2 } from 'lucide-react';
 import { sendConfirmationEmail } from '../lib/email';
 
-// 👇 NUEVO: API de estilistas
-import { makeStylistsApi, type UIStylist } from '../api/stylist.api';
+// APIs existentes
+import { makeStylistsApi } from '../api/stylist.api';
+import { makeServicesApi } from '../api/services.api';
+
+// NUEVO: API de bookings usando la misma fórmula que users
+import { createBooking, mapUIToCreateBooking } from '../api/bookings.api';
+
+// Config (ajusta si no usarás impuestos todavía)
+const TAX_RATE = 0.15; // pon 0 si no calcularás ISV de momento
 
 export default function Book() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, authFetch } = useAuth();
 
-  // API client (usa tu authFetch, aunque el público no requiere token)
+  // API clients
   const stylistsApi = useMemo(() => makeStylistsApi(authFetch), [authFetch]);
+  const servicesApi = useMemo(() => makeServicesApi(authFetch), [authFetch]);
 
   // Booking steps
   const [currentStep, setCurrentStep] = useState(1);
   const [bookingData, setBookingData] = useState<BookingFormData>({
     serviceId: '',
-    stylistId: '',
+    stylistId: '', // guardamos aquí una sola estilista (o vacío = sin preferencia)
     date: format(new Date(), 'yyyy-MM-dd'),
     time: '',
     notes: '',
   });
 
-  // Data
+  // ===== Servicios (desde backend) =====
   const [services, setServices] = useState<Service[]>([]);
+  const [loadingServices, setLoadingServices] = useState(false);
+  const [servicesErr, setServicesErr] = useState<string | null>(null);
   const [selectedService, setSelectedService] = useState<Service | null>(null);
 
-  // 👇 Estilistas desde backend + lista visible según filtros
+  // ===== Estilistas (desde backend, selección ÚNICA) =====
   const [dbStylists, setDbStylists] = useState<Stylist[]>([]);
   const [availableStylists, setAvailableStylists] = useState<Stylist[]>([]);
-
+  const [selectedStylistId, setSelectedStylistId] = useState<string>('');
   const [availableTimeSlots, setAvailableTimeSlots] = useState<string[]>([]);
   const [loadingStylists, setLoadingStylists] = useState(true);
   const [stylistsError, setStylistsError] = useState<string | null>(null);
 
-  // Cargar servicios locales y preselección por URL
-  useEffect(() => {
-    const serviceId = searchParams.get('service');
-    if (serviceId) {
-      const service = getServiceById(serviceId);
-      if (service && !service.isComingSoon) {
-        setBookingData((prev) => ({ ...prev, serviceId }));
-        setSelectedService(service);
-        setCurrentStep(2);
-      }
-    }
-    setServices(getAvailableServices());
-    setAvailableTimeSlots(generateTimeSlots());
-  }, [searchParams]);
+  // Estado de envío para bloquear botones en Confirm
+  const [submitting, setSubmitting] = useState(false);
 
-  // 👉 Cargar estilistas públicos (solo activos) desde backend
+  // ---------- Cargar Servicios (y preselección por ?service=ID) ----------
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setLoadingServices(true);
+      setServicesErr(null);
+      try {
+        const { data } = await servicesApi.listServicesUI({ include_inactive: true, all: true });
+        const active = data.filter((s: Service) => (s as any).active);
+        if (!mounted) return;
+        setServices(active);
+
+        const serviceId = searchParams.get('service');
+        if (serviceId) {
+          const found = active.find((s: Service) => String((s as any).id) === String(serviceId));
+          if (found) {
+            setSelectedService(found);
+            setBookingData(prev => ({ ...prev, serviceId: String((found as any).id) }));
+            setCurrentStep(2);
+          }
+        }
+      } catch (e: any) {
+        if (!mounted) return;
+        setServicesErr(e?.message || 'No se pudieron cargar los servicios.');
+      } finally {
+        if (mounted) setLoadingServices(false);
+      }
+    })();
+
+    setAvailableTimeSlots(generateTimeSlots());
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [servicesApi]);
+
+  // ---------- Cargar Estilistas Públicos (activos) ----------
   useEffect(() => {
     let mounted = true;
     (async () => {
       setLoadingStylists(true);
       setStylistsError(null);
       try {
-        // Dentro del useEffect que llama stylistsApi.listPublicStylistsUI({ all: true })
         const { data } = await stylistsApi.listPublicStylistsUI({ all: true });
-
-        // UIStylist tiene .image; garantizamos que tu tipo Stylist tenga .avatar
-        const mapped: Stylist[] = data.map((s) => {
-          const src = s.image ?? (s as any).img ?? ""; // por si algún backend usa "img"
-          return {
-            id: s.id,
-            name: s.name,
-            specialty: s.specialty || "",
-            avatar: src,     // 👈 lo que lee tu StylistCard
-            bio: s.bio || "",          // 👈 ahora sí mandamos la bio al card
-          } as Stylist;
-        });
-
+        const mapped: Stylist[] = data.map((s: any) => ({
+          id: String(s.id),
+          name: s.name,
+          specialty: s.specialty || '',
+          avatar: s.image ?? s.img ?? '',
+          bio: s.bio || '',
+        }));
+        if (!mounted) return;
         setDbStylists(mapped);
         setAvailableStylists(mapped);
-
       } catch (e: any) {
+        if (!mounted) return;
         setStylistsError(e?.message || 'No se pudieron cargar las estilistas.');
       } finally {
-        setLoadingStylists(false);
+        if (mounted) setLoadingStylists(false);
       }
     })();
     return () => { mounted = false; };
   }, [stylistsApi]);
 
-  // Filtro de estilistas según servicio seleccionado
+  // ---------- Filtro de estilistas por servicio seleccionado ----------
   useEffect(() => {
     if (!selectedService) {
       setAvailableStylists(dbStylists);
       return;
     }
-    const cat = (selectedService.category || '').toString().trim().toLowerCase();
-
-    // Match flexible: si la especialidad contiene la categoría (id o texto)
-    const filtered = dbStylists.filter((s) => {
-      const spec = (s.specialty || '').toString().trim().toLowerCase();
+    const cat = (String((selectedService as any).category || '')).trim().toLowerCase();
+    const filtered = dbStylists.filter(s => {
+      const spec = (String(s.specialty || '')).trim().toLowerCase();
       if (!cat) return true;
-      return spec.includes(cat); // ajusta si quieres equivalencias más estrictas
+      return spec.includes(cat);
     });
-
     setAvailableStylists(filtered.length ? filtered : dbStylists);
   }, [selectedService, dbStylists]);
 
-  // Handle service selection
+  // ---------- Handlers ----------
   const handleServiceSelect = (service: Service) => {
     setSelectedService(service);
-    setBookingData((prev) => ({ ...prev, serviceId: service.id }));
+    setBookingData(prev => ({ ...prev, serviceId: String((service as any).id) }));
     setCurrentStep(2);
   };
 
-  // Handle stylist selection
+  // Selección ÚNICA de estilista: al click, guardamos el id y pasamos a Step 3
   const handleStylistSelect = (stylist: Stylist) => {
-    setBookingData((prev) => ({ ...prev, stylistId: stylist.id }));
+    setSelectedStylistId(String(stylist.id));
+    setBookingData(prev => ({ ...prev, stylistId: String(stylist.id) }));
     setCurrentStep(3);
   };
 
-  // Handle date/time/notes
   const handleDateTimeChange = (field: string, value: string) => {
-    setBookingData((prev) => ({ ...prev, [field]: value }));
+    setBookingData(prev => ({ ...prev, [field]: value }));
   };
-
   const handleNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setBookingData((prev) => ({ ...prev, notes: e.target.value }));
+    setBookingData(prev => ({ ...prev, notes: e.target.value }));
   };
 
-  // Submit
+  // Navegación
+  const handleNext = () => setCurrentStep(s => Math.min(4, s + 1));
+  const handleBack = () => setCurrentStep(s => Math.max(1, s - 1));
+
+  const selectedStylist = selectedStylistId
+    ? availableStylists.find(s => String(s.id) === String(selectedStylistId))
+    : null;
+
+  // Totales para el resumen (usa TAX_RATE y RESERVATION_FEE)
+  const price = selectedService?.price ?? 0;
+  const totals = useMemo(() => {
+    const subtotal = +(Number(price) || 0).toFixed(2);
+    const tax = +(subtotal * TAX_RATE).toFixed(2);
+    const total = +(subtotal + tax).toFixed(2);
+    const remaining = Math.max(total - RESERVATION_FEE, 0);
+    return { subtotal, tax, total, remaining };
+  }, [price]);
+
+  // Submit: crear Booking en backend y bloquear doble clic
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) {
-      toast('Please log in to complete your booking', 'info');
-      navigate('/login?redirect=book');
-      return;
-    }
+
+    if (submitting) return; // evita doble click
+    setSubmitting(true);
+
     try {
-      await sendConfirmationEmail({
-        customerName: user.name,
-        serviceName: selectedService?.name || '',
-        appointmentDate: bookingData.date,
-        appointmentTime: bookingData.time,
+      if (!user) {
+        toast('Please log in to complete your booking', 'info');
+        navigate('/login?redirect=book');
+        return;
+      }
+      if (!selectedService) {
+        toast('Select a service first', 'warning');
+        setCurrentStep(1);
+        return;
+      }
+      if (!bookingData.date || !bookingData.time) {
+        toast('Select date & time', 'warning');
+        setCurrentStep(3);
+        return;
+      }
+
+      const dto = mapUIToCreateBooking({
+        userId: user.id,
+        stylistId: bookingData.stylistId || '',
+        date: bookingData.date,
+        time: bookingData.time,
+        notes: bookingData.notes,
+        service: {
+          id: (selectedService as any).id,
+          price: selectedService.price,
+        },
+        taxRate: TAX_RATE,
+        status: 0,          // STATUS_PENDING
+        includeItems: true, // enviamos el servicio como item
       });
-      navigate('/checkout', { state: { bookingData, type: 'service' } });
-    } catch (error) {
-      console.error('Failed to send confirmation email:', error);
-      toast(
-        'Booking confirmed but failed to send email confirmation. Please check your appointment details in your account.',
-        'warning'
-      );
+
+      const created = await createBooking(dto, { fetcher: authFetch });
+
+      // Email opcional después de crear
+      try {
+        await sendConfirmationEmail({
+          customerName: user.name,
+          serviceName: selectedService.name || '',
+          appointmentDate: bookingData.date,
+          appointmentTime: bookingData.time,
+        });
+      } catch (mailErr) {
+        console.warn('Failed to send confirmation email:', mailErr);
+      }
+
+      toast('Your appointment has been booked ✔', 'success');
+      if ((created as any)?.id) {
+        navigate(`/account/bookings/${(created as any).id}`);
+      } else {
+        navigate('/account/bookings');
+      }
+    } catch (error: any) {
+      console.error('Failed to create booking:', error);
+      toast(error?.message ?? 'Failed to create booking', 'error');
+    } finally {
+      setSubmitting(false);
     }
   };
-
-  // Nav buttons
-  const handleNext = () => setCurrentStep((s) => Math.min(4, s + 1));
-  const handleBack = () => setCurrentStep((s) => Math.max(1, s - 1));
-
-  const selectedStylist = bookingData.stylistId
-    ? availableStylists.find((s) => s.id === bookingData.stylistId)
-    : null;
 
   return (
     <MainLayout>
@@ -185,13 +259,26 @@ export default function Book() {
           {/* Steps */}
           <div className="mb-12">
             <div className="flex justify-between max-w-3xl mx-auto">
-              {[1,2,3,4].map((n) => (
-                <div key={n} className={`flex flex-col items-center ${currentStep >= n ? 'text-primary-600' : 'text-gray-400'}`}>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center mb-2 ${
-                    currentStep >= n ? 'bg-primary-100 border-2 border-primary-500' : 'bg-gray-100'
-                  }`}>{n}</div>
+              {[1, 2, 3, 4].map((n) => (
+                <div
+                  key={n}
+                  className={`flex flex-col items-center ${currentStep >= n ? 'text-primary-600' : 'text-gray-400'}`}
+                >
+                  <div
+                    className={`w-10 h-10 rounded-full flex items-center justify-center mb-2 ${
+                      currentStep >= n ? 'bg-primary-100 border-2 border-primary-500' : 'bg-gray-100'
+                    }`}
+                  >
+                    {n}
+                  </div>
                   <span className="text-sm font-medium">
-                    {n===1?'Select Service':n===2?'Choose Stylist':n===3?'Select Date & Time':'Confirm Booking'}
+                    {n === 1
+                      ? 'Select Service'
+                      : n === 2
+                      ? 'Choose Stylist'
+                      : n === 3
+                      ? 'Select Date & Time'
+                      : 'Confirm Booking'}
                   </span>
                 </div>
               ))}
@@ -202,21 +289,29 @@ export default function Book() {
           {currentStep === 1 && (
             <div className="animate-fade-in">
               <h2 className="text-center mb-8">Select a Service</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {services.map((service) => (
-                  <div
-                    key={service.id}
-                    onClick={() => handleServiceSelect(service)}
-                    className="cursor-pointer transition-transform hover:-translate-y-1"
-                  >
-                    <ServiceCard service={service} />
-                  </div>
-                ))}
-              </div>
+
+              {loadingServices && (
+                <div className="text-center text-gray-500 py-8">Loading services…</div>
+              )}
+              {servicesErr && <div className="text-center text-red-600 py-8">{servicesErr}</div>}
+
+              {!loadingServices && !servicesErr && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  {services.map((service) => (
+                    <div
+                      key={(service as any).id}
+                      onClick={() => handleServiceSelect(service)}
+                      className="cursor-pointer transition-transform hover:-translate-y-1"
+                    >
+                      <ServiceCard service={service} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Step 2: Choose Stylist (desde backend) */}
+          {/* Step 2: Choose ONE Stylist */}
           {currentStep === 2 && selectedService && (
             <div className="animate-fade-in">
               <h2 className="text-center mb-8">Choose Your Stylist</h2>
@@ -235,7 +330,7 @@ export default function Book() {
                     <StylistCard
                       key={stylist.id}
                       stylist={stylist}
-                      isSelected={bookingData.stylistId === stylist.id}
+                      isSelected={selectedStylistId === String(stylist.id)}
                       onClick={() => handleStylistSelect(stylist)}
                     />
                   ))}
@@ -246,7 +341,15 @@ export default function Book() {
                 <Button variant="outline" onClick={handleBack} leftIcon={<ArrowLeft className="w-4 h-4" />}>
                   Back
                 </Button>
-                <Button onClick={() => setCurrentStep(3)} rightIcon={<ArrowRight className="w-4 h-4" />}>
+                <Button
+                  onClick={() => {
+                    // Permitir “No preference”
+                    setSelectedStylistId('');
+                    setBookingData(prev => ({ ...prev, stylistId: '' }));
+                    setCurrentStep(3);
+                  }}
+                  rightIcon={<ArrowRight className="w-4 h-4" />}
+                >
                   Skip (No Preference)
                 </Button>
               </div>
@@ -306,7 +409,7 @@ export default function Book() {
                     className="input"
                     placeholder="Any specific requests for your appointment..."
                     value={bookingData.notes || ''}
-                    onChange={(e) => setBookingData((p) => ({ ...p, notes: e.target.value }))}
+                    onChange={handleNotesChange}
                   />
                 </div>
               </div>
@@ -334,8 +437,8 @@ export default function Book() {
                     <div>
                       <h4 className="font-medium text-primary-800 mb-1">Reservation Fee Required</h4>
                       <p className="text-sm text-primary-700">
-                        Una reservation fee de {formatPrice(RESERVATION_FEE)} VIA Transferencia se requiere para completar tu reservacion. 
-                        Tu balance restante estimado de {formatPrice(selectedService.price - RESERVATION_FEE)} puede ser pagado una vez tu servicio se haya completado!
+                        Una reservation fee de {formatPrice(RESERVATION_FEE)} se requiere para completar tu reservación.
+                        Tu balance restante estimado de {formatPrice(totals.remaining)} puede ser pagado una vez tu servicio se haya completado!
                       </p>
                     </div>
                   </div>
@@ -348,14 +451,14 @@ export default function Book() {
                     <span className="text-gray-600">Service:</span>
                     <span className="font-medium">{selectedService.name}</span>
                   </div>
-                  {bookingData.stylistId && (
+
+                  {selectedStylist && (
                     <div className="flex justify-between mb-2">
                       <span className="text-gray-600">Stylist:</span>
-                      <span className="font-medium">
-                        {availableStylists.find((s) => s.id === bookingData.stylistId)?.name}
-                      </span>
+                      <span className="font-medium">{selectedStylist.name}</span>
                     </div>
                   )}
+
                   <div className="flex justify-between mb-2">
                     <span className="text-gray-600">Date:</span>
                     <span className="font-medium">
@@ -371,6 +474,7 @@ export default function Book() {
                     <span className="text-gray-600">Time:</span>
                     <span className="font-medium">{bookingData.time}</span>
                   </div>
+
                   {bookingData.notes && (
                     <div className="mt-4">
                       <span className="text-gray-600 block mb-1">Notes:</span>
@@ -381,8 +485,16 @@ export default function Book() {
 
                 <div className="space-y-3">
                   <div className="flex justify-between items-center text-base">
-                    <span className="text-gray-600">Total Service Price:</span>
-                    <span>{formatPrice(selectedService.price)}</span>
+                    <span className="text-gray-600">Subtotal:</span>
+                    <span>{formatPrice(totals.subtotal)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-base">
+                    <span className="text-gray-600">Tax:</span>
+                    <span>{formatPrice(totals.tax)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-base font-medium">
+                    <span>Total:</span>
+                    <span>{formatPrice(totals.total)}</span>
                   </div>
                   <div className="flex justify-between items-center text-base font-medium text-primary-600">
                     <span>Reservation Fee (Due Now):</span>
@@ -390,15 +502,33 @@ export default function Book() {
                   </div>
                   <div className="flex justify-between items-center text-base">
                     <span className="text-gray-600">Remaining Balance:</span>
-                    <span>{formatPrice(selectedService.price - RESERVATION_FEE)}</span>
+                    <span>{formatPrice(totals.remaining)}</span>
                   </div>
                 </div>
 
                 <div className="mt-8 flex flex-col gap-4">
-                  <Button onClick={handleSubmit} size="lg" fullWidth>
-                    Pay Reservation Fee & Confirm
+                  <Button
+                    onClick={handleSubmit}
+                    size="lg"
+                    fullWidth
+                    disabled={submitting}
+                    aria-busy={submitting}
+                  >
+                    {submitting ? (
+                      <span className="inline-flex items-center">
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processing…
+                      </span>
+                    ) : (
+                      'Confirm'
+                    )}
                   </Button>
-                  <Button variant="outline" onClick={handleBack} fullWidth>
+                  <Button
+                    variant="outline"
+                    onClick={handleBack}
+                    fullWidth
+                    disabled={submitting} // ← también bloqueado para evitar inconsistencias
+                  >
                     Go Back
                   </Button>
                 </div>

@@ -7,8 +7,8 @@ export interface User {
   email: string;
   phone: string | null;
   role: number;            // 0 = cliente, 1 = admin
-  created_at: string;      // ISO date string
-  updated_at: string;      // ISO date string
+  created_at: string;
+  updated_at: string;
   avatar?: string;
 }
 
@@ -28,18 +28,18 @@ export type Service = {
   price: number;
   image?: string;
   category?: string;
-  active: boolean;        // <-- requerido
-  isComingSoon?: boolean; // opcional, si lo usas en UI
+  active: boolean;         // requerido por la UI
+  isComingSoon?: boolean;
 };
-
 
 export interface Product {
   id: string;
   name: string;
   description: string;
   price: number;
-  image: string;
+  image: string;           // <- así lo usa la UI
   category: string;
+  inStock: boolean;        // <- NECESARIO para ProductModal/Home
 }
 
 export interface Category {
@@ -56,6 +56,30 @@ export interface Stylist {
 }
 
 // ========================
+// Órdenes de productos
+// ========================
+export interface ProductOrderItem {
+  productId: string;
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  image?: string;
+  category?: string;
+}
+
+export type OrderStatus = "pending" | "fulfilled" | "cancelled" | "refunded";
+
+export interface ProductOrder {
+  id: string;
+  clientId: string;
+  items: ProductOrderItem[];
+  total: number;
+  status: OrderStatus;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ========================
 // Carrito
 // ========================
 export interface CartItem {
@@ -63,49 +87,42 @@ export interface CartItem {
   name: string;
   price: number;
   quantity: number;
-  type: 'product' | 'service';
+  type: "product" | "service";
   image?: string;
 }
 
 // ========================
 // Bookings / Citas
 // ========================
-
-// Item de la cita (uno por servicio seleccionado)
 export interface AppointmentItem {
   id: string;                     // booking_items.id
-  serviceId: string | null;       // services.id (puede venir null si no está seteado)
+  serviceId: string | null;       // services.id
   name: string | null;            // services.name
   quantity: number;
   unitPrice: number;
   lineTotal: number;              // unitPrice * quantity
-  duration?: number | null;       // duración del servicio (minutos), si aplica
-  listPrice?: number | null;      // precio de lista del servicio, si aplica
+  duration?: number | null;       // minutos
+  listPrice?: number | null;      // precio de lista
 }
 
-// Cita agregada para la UI
 export interface Appointment {
   id: string;
   userId: string;
-  stylistId: string;                              // requerido
+  stylistId: string | null;   // ← permitir null
   stylistName?: string | null;
-
-  date: string | null;                            // ej: "Thu, Aug 21, 2025"
-  time: string | null;                            // ej: "10:00 AM"
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  date: string | null;
+  time: string | null;
+  status: "pending" | "confirmed" | "completed" | "cancelled";
   notes?: string | null;
-
-  price: number;                                  // total_price de la cita
-  serviceName?: string | null;                    // atajo: 1 ítem => nombre; >1 => "N services"
-
-  items: AppointmentItem[];                       // todos los ítems/servicios de la cita
+  price: number;
+  serviceName?: string | null;
+  items: AppointmentItem[];
 }
+
 
 // ========================
 // Formularios
 // ========================
-
-// Si SOLO reservas 1 servicio por cita (simple):
 export interface BookingFormData {
   serviceId: string;
   stylistId?: string;
@@ -114,21 +131,5 @@ export interface BookingFormData {
   notes?: string;
 }
 
-/*
-// Si vas a soportar varios servicios por cita (alternativa):
-export interface BookingFormData {
-  stylistId?: string;
-  date: string;           // "YYYY-MM-DD"
-  time: string;           // "HH:mm"
-  notes?: string;
-  items: Array<{
-    serviceId: string;
-    quantity: number;
-  }>;
-}
-*/
-
-// ========================
-// (Opcional) Tipo que refleja exactamente lo que viene del backend.
-// Si tu backend ya devuelve el mismo shape que Appointment, puedes usar:
+// Si necesitas reflejar exactamente lo del backend:
 export type ApiAppointment = Appointment;

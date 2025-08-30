@@ -1,26 +1,57 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { MainLayout } from '../components/layout/MainLayout';
 import { Button } from '../components/ui/Button';
 import { ServiceCard } from '../components/ServiceCard';
 import { StylistCard } from '../components/StylistCard';
-import { Service, Stylist } from '../types';
-import { getAvailableServices } from '../data/services';
-import { stylists } from '../data/stylists';
+import type { Service, Stylist } from '../types';
 import { Calendar, Sparkles, Heart, Users } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+
+// APIs
+import { makeServicesApi } from '../api/services.api';
+import { makeStylistsApi, type UIStylist } from '../api/stylist.api';
 
 export default function Home() {
+  const { authFetch } = useAuth();
+
+  const servicesApi = useMemo(() => makeServicesApi(authFetch), [authFetch]);
+  const stylistsApi = useMemo(() => makeStylistsApi(authFetch), [authFetch]);
+
   const [featuredServices, setFeaturedServices] = useState<Service[]>([]);
   const [featuredStylists, setFeaturedStylists] = useState<Stylist[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
-    // Get a subset of services for the homepage
-    const services = getAvailableServices();
-    setFeaturedServices(services.slice(0, 3));
-    
-    // Get a subset of stylists for the homepage
-    setFeaturedStylists(stylists.slice(0, 3));
-  }, []);
+    let mounted = true;
+    (async () => {
+      setLoading(true);
+      setErr(null);
+      try {
+        // Servicios desde backend (activos; evitamos coming soon)
+        const { data: svcData } = await servicesApi.listServicesUI({ include_inactive: true, all: true });
+        const active = svcData.filter(s => s.active && !s.isComingSoon);
+        if (mounted) setFeaturedServices(active.slice(0, 3));
+
+        // Estilistas públicos (activos) desde backend
+        const { data: styData } = await stylistsApi.listPublicStylistsUI({ all: true });
+        const mapped: Stylist[] = (styData as UIStylist[]).map(s => ({
+          id: s.id,
+          name: s.name,
+          specialty: s.specialty || '',
+          avatar: s.image ?? (s as any).img ?? '',
+          bio: s.bio || '',
+        }));
+        if (mounted) setFeaturedStylists(mapped.slice(0, 3));
+      } catch (e: any) {
+        if (mounted) setErr(e?.message || 'No se pudo cargar la información.');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [servicesApi, stylistsApi]);
 
   return (
     <MainLayout>
@@ -34,7 +65,7 @@ export default function Home() {
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black/70 to-black/30" />
         </div>
-        
+
         <div className="container relative z-10 text-white">
           <div className="max-w-2xl">
             <h1 className="text-5xl md:text-6xl font-heading font-semibold mb-4 animate-slide-up">
@@ -48,20 +79,16 @@ export default function Home() {
             </p>
             <div className="flex flex-wrap gap-4 animate-slide-up" style={{ animationDelay: '0.4s' }}>
               <Link to="/book">
-                <Button size="lg">
-                  Book an Appointment
-                </Button>
+                <Button size="lg">Book an Appointment</Button>
               </Link>
               <Link to="/services">
-                <Button variant="outline" size="lg">
-                  Explore Services
-                </Button>
+                <Button variant="outline" size="lg">Explore Services</Button>
               </Link>
             </div>
           </div>
         </div>
       </section>
-      
+
       {/* Services Preview Section */}
       <section className="section bg-white">
         <div className="container">
@@ -71,23 +98,29 @@ export default function Home() {
               We offer a wide range of beauty and wellness services designed to help you look and feel your best. Each service is delivered by our highly trained professionals using premium products.
             </p>
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {featuredServices.map((service) => (
-              <ServiceCard key={service.id} service={service} />
-            ))}
-          </div>
-          
-          <div className="text-center mt-12">
-            <Link to="/services">
-              <Button variant="outline" size="lg">
-                View All Services
-              </Button>
-            </Link>
-          </div>
+
+          {err ? (
+            <div className="text-center text-red-600 py-8">{err}</div>
+          ) : loading ? (
+            <div className="text-center py-8 text-gray-500">Loading…</div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {featuredServices.map((service) => (
+                  <ServiceCard key={service.id} service={service} />
+                ))}
+              </div>
+
+              <div className="text-center mt-12">
+                <Link to="/services">
+                  <Button variant="outline" size="lg">View All Services</Button>
+                </Link>
+              </div>
+            </>
+          )}
         </div>
       </section>
-      
+
       {/* Features Section */}
       <section className="section bg-gray-50">
         <div className="container">
@@ -97,7 +130,7 @@ export default function Home() {
               At Glamora Studio, we are committed to excellence in every aspect of our service, creating an exceptional experience for each client.
             </p>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
             <div className="bg-white p-8 rounded-lg shadow-soft text-center">
               <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -108,7 +141,7 @@ export default function Home() {
                 Enjoy a luxurious atmosphere and exceptional service during every visit.
               </p>
             </div>
-            
+
             <div className="bg-white p-8 rounded-lg shadow-soft text-center">
               <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Users className="w-8 h-8 text-primary-600" />
@@ -118,7 +151,7 @@ export default function Home() {
                 Our team consists of highly trained professionals with years of experience.
               </p>
             </div>
-            
+
             <div className="bg-white p-8 rounded-lg shadow-soft text-center">
               <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Heart className="w-8 h-8 text-primary-600" />
@@ -128,7 +161,7 @@ export default function Home() {
                 We use only premium products that are gentle on you and the environment.
               </p>
             </div>
-            
+
             <div className="bg-white p-8 rounded-lg shadow-soft text-center">
               <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center mx-auto mb-6">
                 <Calendar className="w-8 h-8 text-primary-600" />
@@ -141,7 +174,7 @@ export default function Home() {
           </div>
         </div>
       </section>
-      
+
       {/* Stylists Section */}
       <section className="section bg-white">
         <div className="container">
@@ -151,15 +184,21 @@ export default function Home() {
               Our talented team of beauty professionals is dedicated to helping you look and feel your best. Each stylist brings unique skills and expertise to Glamora Studio.
             </p>
           </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {featuredStylists.map((stylist) => (
-              <StylistCard key={stylist.id} stylist={stylist} />
-            ))}
-          </div>
+
+          {err ? (
+            <div className="text-center text-red-600 py-8">{err}</div>
+          ) : loading ? (
+            <div className="text-center py-8 text-gray-500">Loading…</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {featuredStylists.map((stylist) => (
+                <StylistCard key={stylist.id} stylist={stylist} />
+              ))}
+            </div>
+          )}
         </div>
       </section>
-      
+
       {/* CTA Section */}
       <section className="py-20 bg-primary-500 text-white">
         <div className="container text-center">

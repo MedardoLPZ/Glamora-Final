@@ -119,7 +119,7 @@ export default function Signup() {
                 type="text"
                 id="name"
                 name="name"
-                placeholder="Jane Doe"
+                placeholder="Nombre"
                 value={formData.name}
                 onChange={handleChange}
                 error={errors.name}
@@ -132,7 +132,7 @@ export default function Signup() {
                 type="email"
                 id="email"
                 name="email"
-                placeholder="your@email.com"
+                placeholder="@email.com"
                 value={formData.email}
                 onChange={handleChange}
                 error={errors.email}

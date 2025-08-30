@@ -1,10 +1,8 @@
-// src/components/ProductModal.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { X, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { makeProductsApi, type UIProduct } from "../../api/product.api";
 import type { Product } from "../../types";
-// FIX 1: importar del archivo correcto y también la función
 import { CategoryProduct, getCategoryProductLabel } from "../../data/categoryProduc";
 
 // Evitar caché en previews http(s) o rutas relativas; no tocar data URLs
@@ -26,7 +24,7 @@ interface ProductModalProps {
   onClose: () => void;
   onAddProduct: (product: Omit<Product, "id">) => void; // compat
   onUpdateProducts: (products: Product[]) => void;
-  products: Product[]; // fallback inicial
+  products: Product[]; // fallback inicial (opcional)
 }
 
 export const ProductModal: React.FC<ProductModalProps> = ({
@@ -64,7 +62,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       if (!isOpen) return;
       setError(null);
 
-      // Fallback inmediato desde props
+      // Fallback inmediato desde props (si vienen productos)
       if (products && products.length) {
         const fallback: Row[] = products.map((p) => ({
           id: String(p.id),
@@ -72,7 +70,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
           price: Number(p.price),
           category: p.category ?? "",
           description: p.description ?? "",
-          image: p.photo ?? "",
+          image: p.image ?? "",
           inStock: !!p.inStock,
           _file: null,
         }));
@@ -100,7 +98,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  // Notificar al padre con el shape de ../types (usa "photo")
+  // Notificar al padre con el shape de ../types (usa "image")
   function notifyParent(next: Row[]) {
     const mapped: Product[] = next.map((r) => ({
       id: r.id,
@@ -109,7 +107,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       category: r.category ?? "",
       description: r.description ?? "",
       inStock: r.inStock,
-      photo: r.image ?? "",
+      image: r.image ?? "",
     }));
     onUpdateProducts(mapped);
   }
@@ -140,14 +138,14 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       setRows(next);
       notifyParent(next);
 
-      // Compat opcional
+      // Compat opcional hacia el padre
       onAddProduct({
         name: created.name,
         price: created.price,
         category: created.category ?? "",
         description: created.description ?? "",
         inStock: created.inStock,
-        photo: created.image ?? "",
+        image: created.image ?? "",
       });
 
       // Limpiar form

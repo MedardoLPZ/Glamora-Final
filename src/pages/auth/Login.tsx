@@ -109,7 +109,7 @@ export default function Login() {
                 type="email"
                 id="email"
                 name="email"
-                placeholder="your@email.com"
+                placeholder="@email.com"
                 value={formData.email}
                 onChange={handleChange}
                 error={errors.email}
