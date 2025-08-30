@@ -20,16 +20,18 @@ export interface AuthResponse {
 // ========================
 // Catálogos
 // ========================
-export interface Service {
+export type Service = {
   id: string;
   name: string;
-  description: string;
-  price: number;           // precio base del servicio
-  duration: number;        // minutos (front normalizado)
-  image: string;
-  category: string;
-  isComingSoon?: boolean;
-}
+  description?: string;
+  duration?: number;
+  price: number;
+  image?: string;
+  category?: string;
+  active: boolean;        // <-- requerido
+  isComingSoon?: boolean; // opcional, si lo usas en UI
+};
+
 
 export interface Product {
   id: string;
@@ -38,6 +40,11 @@ export interface Product {
   price: number;
   image: string;
   category: string;
+}
+
+export interface Category {
+  id: string;
+  description: string;
 }
 
 export interface Stylist {

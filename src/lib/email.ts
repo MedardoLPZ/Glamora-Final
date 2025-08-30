@@ -1,28 +1,35 @@
-interface SendConfirmationEmailParams {
+// src/lib/email.ts
+const EMAIL_ENDPOINT =
+  (import.meta as any).env?.VITE_EMAIL_ENDPOINT || ""; // opcional
+
+export type ConfirmationEmailPayload = {
   customerName: string;
-  customerEmail: string;
   serviceName: string;
-  appointmentDate: string;
-  appointmentTime: string;
-}
+  appointmentDate: string; // p.ej. 'YYYY-MM-DD'
+  appointmentTime: string; // p.ej. 'HH:mm'
+  toEmail?: string;
+};
 
-export async function sendConfirmationEmail(params: SendConfirmationEmailParams) {
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-confirmation-email`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify(params),
-    }
-  );
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.message || 'Failed to send confirmation email');
+// 👇 Export **con nombre** (match con tu import { sendConfirmationEmail } ...)
+export async function sendConfirmationEmail(
+  payload: ConfirmationEmailPayload
+): Promise<void> {
+  // Si no tienes endpoint aún, no rompas el flujo
+  if (!EMAIL_ENDPOINT) {
+    console.warn("[email] VITE_EMAIL_ENDPOINT no configurado. Se omite envío.");
+    return;
   }
 
-  return response.json();
+  const res = await fetch(EMAIL_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    // Propaga error para que tu try/catch muestre el toast
+    let msg = `${res.status} ${res.statusText}`;
+    try { msg = await res.text(); } catch {}
+    throw new Error(msg);
+  }
 }

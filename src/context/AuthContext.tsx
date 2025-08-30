@@ -212,3 +212,13 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   return ctx;
 }
+
+const authFetch = async (path: string, init: RequestInit = {}) => {
+  const headers = new Headers(init.headers || {});
+  if (!(init.body instanceof FormData)) {
+    headers.set("Content-Type", "application/json");
+  }
+  const t = storeGetToken();
+  if (t) headers.set("Authorization", `Bearer ${t}`);
+  return fetch(`${API_BASE}${path}`, { ...init, headers });
+};
